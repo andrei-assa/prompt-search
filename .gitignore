@@ -1,0 +1,43 @@
+.prompts/
+
+# Local Python environments
+.venv/
+venv/
+.python-version
+
+# Python cache / bytecode
+__pycache__/
+*.py[cod]
+*.pyd
+
+# Packaging/build artifacts
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# Test/coverage artifacts
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+
+# Type checker / linter caches
+.mypy_cache/
+.pytype/
+.ruff_cache/
+.pyright/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Environment files
+.env
+.env.*
+
+# Logs
+*.log
