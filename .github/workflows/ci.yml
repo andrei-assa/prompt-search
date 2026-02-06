@@ -23,18 +23,20 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
 
+      - name: Create venv
+        run: uv venv
+
       - name: Install deps
         run: uv pip install -e ".[dev]"
 
       - name: Lint
-        run: ruff check .
+        run: .venv/bin/python -m ruff check .
 
       - name: Test
-        run: python -m pytest
+        run: .venv/bin/python -m pytest
 
       - name: Build
-        run: python -m build
+        run: .venv/bin/python -m build
 
       - name: Twine check
-        run: twine check dist/*
-
+        run: .venv/bin/python -m twine check dist/*
