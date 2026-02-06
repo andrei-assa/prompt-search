@@ -24,6 +24,12 @@ Or with uv:
 uv tool install .
 ```
 
+From GitHub (replace `REPLACE_ME`):
+
+```bash
+uv tool install "git+https://github.com/REPLACE_ME/prompt-search"
+```
+
 ## Quickstart
 
 ```bash
@@ -172,3 +178,9 @@ prompt-search list-sessions --format json
 
 - If DuckDB's `fts` extension is unavailable (e.g. offline on first use), `search` will fall back to substring search.
 - Default search scope is user-only. Use `--include-assistant` / `--include-internal` to widen.
+
+## Privacy / data handling
+
+- By default, `prompt-search` reads Codex session history from `~/.codex/sessions/**/*` and writes a local index database to `~/.prompt-search/db.duckdb`.
+- The tool does not intentionally send your session content anywhere.
+- DuckDB full-text search uses an extension (`fts`). If it is not already available locally, DuckDB may attempt to download it the first time you run `prompt-search refresh` while online.

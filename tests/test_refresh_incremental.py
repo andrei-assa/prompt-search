@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import duckdb
-
 from prompt_search.ingest import refresh
 from prompt_search.paths import db_path
 from prompt_search.search import search as search_impl
@@ -91,4 +89,3 @@ def test_fts_optional(tmp_path: Path) -> None:
     ensure_schema(con)
     ok = try_enable_fts(con)
     assert is_fts_available(con) == ok
-

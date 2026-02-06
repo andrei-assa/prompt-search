@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 import duckdb
 
 from prompt_search.search import extract_context_lines, search as search_impl
@@ -70,4 +68,3 @@ def test_substring_sort_recent_uses_timestamp() -> None:
     )
     assert mode == "substring"
     assert [r.doc_id for r in results] == ["2", "1"]  # newest first
-
