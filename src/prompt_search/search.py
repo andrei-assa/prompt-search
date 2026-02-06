@@ -17,7 +17,9 @@ class SearchResult:
     file_path: str
     line_no: int
     score: float | None
+    match_pos: int | None
     snippet: str
+    text: str | None
 
 
 def _make_snippet(text: str, query: str, max_len: int = 180) -> str:
@@ -48,6 +50,58 @@ def _make_snippet(text: str, query: str, max_len: int = 180) -> str:
     return s
 
 
+def _normalize_needles(query: str) -> list[str]:
+    q = query.strip()
+    if not q:
+        return []
+    needles = [q]
+    for p in q.split():
+        if len(p) >= 2:
+            needles.append(p)
+    # Deduplicate case-insensitively while preserving order.
+    seen = set()
+    out = []
+    for n in needles:
+        key = n.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(n)
+    return out
+
+
+def extract_context_lines(text: str, query: str, n: int) -> str:
+    if n <= 0:
+        return _make_snippet(text, query)
+
+    lines = text.splitlines()
+    if len(lines) <= 1:
+        return _make_snippet(text, query)
+
+    needles = _normalize_needles(query)
+    if not needles:
+        return "\n".join(lines[: min(len(lines), 2 * n + 1)])
+
+    low_lines = [ln.lower() for ln in lines]
+    best_i = None
+    best_pos = None
+    for i, ln in enumerate(low_lines):
+        for needle in needles:
+            pos = ln.find(needle.lower())
+            if pos < 0:
+                continue
+            if best_pos is None or pos < best_pos or (pos == best_pos and (best_i is None or i < best_i)):
+                best_pos = pos
+                best_i = i
+
+    if best_i is None:
+        return "\n".join(lines[: min(len(lines), 2 * n + 1)])
+
+    start = max(0, best_i - n)
+    end = min(len(lines), best_i + n + 1)
+    return "\n".join(lines[start:end])
+
+
 def search(
     con: Any,
     *,
@@ -55,6 +109,8 @@ def search(
     limit: int,
     include_assistant: bool,
     include_internal: bool,
+    sort: str = "relevance",
+    include_text: bool = False,
 ) -> tuple[list[SearchResult], str]:
     """
     Returns (results, mode) where mode is "fts" or "substring".
@@ -78,6 +134,9 @@ def search(
     fts_index_ready = get_setting(con, "fts_index_ready") == "1"
 
     if is_fts_available(con) and fts_index_ready:
+        order = "score DESC NULLS LAST, d.event_ts DESC NULLS LAST"
+        if sort == "recent":
+            order = "d.event_ts DESC NULLS LAST, score DESC NULLS LAST"
         sql = f"""
         SELECT
           d.doc_id,
@@ -88,12 +147,13 @@ def search(
           d.file_path,
           d.line_no,
           fts_main_docs.match_bm25(d.doc_id, ?) AS score,
-          d.text
+          d.text,
+          NULL::INTEGER AS match_pos
         FROM docs d
         WHERE {role_clause}
           AND {kind_clause}
           AND fts_main_docs.match_bm25(d.doc_id, ?) IS NOT NULL
-        ORDER BY score DESC NULLS LAST, d.event_ts DESC NULLS LAST
+        ORDER BY {order}
         LIMIT ?
         """
         try:
@@ -103,7 +163,8 @@ def search(
             rows = []
             fts_index_ready = False
         results: list[SearchResult] = []
-        for (doc_id, session_id, event_ts, role, kind, file_path, line_no, score, text) in rows:
+        for (doc_id, session_id, event_ts, role, kind, file_path, line_no, score, text, match_pos) in rows:
+            raw_text = str(text)
             results.append(
                 SearchResult(
                     doc_id=str(doc_id),
@@ -114,7 +175,9 @@ def search(
                     file_path=str(file_path),
                     line_no=int(line_no),
                     score=float(score) if score is not None else None,
-                    snippet=_make_snippet(str(text), q),
+                    match_pos=None,
+                    snippet=_make_snippet(raw_text, q),
+                    text=raw_text if include_text else None,
                 )
             )
         if results:
@@ -122,21 +185,33 @@ def search(
         # Fall through to substring if FTS yields nothing due to missing index.
 
     # Fallback: substring search
+    order = "match_pos ASC NULLS LAST, event_ts DESC NULLS LAST"
+    if sort == "recent":
+        order = "event_ts DESC NULLS LAST, match_pos ASC NULLS LAST"
+
+    text_expr = "text"
+    if not include_text:
+        # Still needed for snippet generation, but we can keep it in the row and drop later.
+        text_expr = "text"
+
     rows = con.execute(
         f"""
         SELECT
-          doc_id, session_id, event_ts, role, kind, file_path, line_no, text
+          doc_id, session_id, event_ts, role, kind, file_path, line_no,
+          {text_expr} AS text,
+          instr(lower(text), lower(?)) AS match_pos
         FROM docs
         WHERE {role_clause}
           AND {kind_clause}
           AND lower(text) LIKE '%' || lower(?) || '%'
-        ORDER BY event_ts DESC NULLS LAST
+        ORDER BY {order}
         LIMIT ?
         """,
-        [q, limit],
+        [q, q, limit],
     ).fetchall()
     results = []
-    for (doc_id, session_id, event_ts, role, kind, file_path, line_no, text) in rows:
+    for (doc_id, session_id, event_ts, role, kind, file_path, line_no, text, match_pos) in rows:
+        raw_text = str(text)
         results.append(
             SearchResult(
                 doc_id=str(doc_id),
@@ -147,7 +222,9 @@ def search(
                 file_path=str(file_path),
                 line_no=int(line_no),
                 score=None,
-                snippet=_make_snippet(str(text), q),
+                match_pos=int(match_pos) if match_pos is not None else None,
+                snippet=_make_snippet(raw_text, q),
+                text=raw_text if include_text else None,
             )
         )
     return (results, "substring")

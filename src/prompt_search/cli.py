@@ -145,6 +145,21 @@ def search(
     data_dir: Path = typer.Option(None, "--data-dir", help="prompt-search data directory."),
     limit: int = typer.Option(20, "--limit", min=1, max=5000),
     snippet_len: int = typer.Option(180, "--snippet-len", min=40, max=2000, help="Snippet length."),
+    sort: str = typer.Option(
+        "relevance",
+        "--sort",
+        help="Sort order: relevance, recent.",
+        show_choices=True,
+        case_sensitive=False,
+    ),
+    context_lines: int = typer.Option(
+        0,
+        "--context-lines",
+        min=0,
+        max=200,
+        help="Show N surrounding lines around the match (0=snippet).",
+    ),
+    full_content: bool = typer.Option(False, "--full-content", help="Print full matched content (very long)."),
     include_assistant: bool = typer.Option(False, "--include-assistant", help="Include assistant messages."),
     include_internal: bool = typer.Option(False, "--include-internal", help="Include internal events."),
     auto_refresh: bool = typer.Option(False, "--auto-refresh", help="Run refresh before searching."),
@@ -169,6 +184,14 @@ def search(
     ddir = (data_dir or default_data_dir()).expanduser()
     output_format = _normalize_choice("json" if json_out else output_format, OUTPUT_FORMATS, "--format")
     color = _normalize_choice(color, COLOR_MODES, "--color")
+    sort = _normalize_choice(sort, ("relevance", "recent"), "--sort")
+
+    if full_content and context_lines > 0:
+        typer.echo("cannot combine --full-content with --context-lines > 0", err=True)
+        raise typer.Exit(code=2)
+    if full_content and output_format == "table":
+        typer.echo("cannot use --full-content with --format table; use --format text|markdown|json", err=True)
+        raise typer.Exit(code=2)
 
     if auto_refresh:
         sdir = (sessions_dir or default_sessions_dir()).expanduser()
@@ -190,10 +213,51 @@ def search(
         limit=limit,
         include_assistant=include_assistant,
         include_internal=include_internal,
+        sort=sort,
+        include_text=bool(full_content or context_lines > 0),
     )
 
+    # Resolve the content to display per row.
+    if full_content:
+        # renderer will use .snippet; override snippet with full text for display
+        results = [
+            type(r)(
+                doc_id=r.doc_id,
+                session_id=r.session_id,
+                event_ts=r.event_ts,
+                role=r.role,
+                kind=r.kind,
+                file_path=r.file_path,
+                line_no=r.line_no,
+                score=r.score,
+                match_pos=r.match_pos,
+                snippet=(r.text or r.snippet),
+                text=r.text,
+            )
+            for r in results
+        ]
+    elif context_lines > 0:
+        from .search import extract_context_lines
+
+        results = [
+            type(r)(
+                doc_id=r.doc_id,
+                session_id=r.session_id,
+                event_ts=r.event_ts,
+                role=r.role,
+                kind=r.kind,
+                file_path=r.file_path,
+                line_no=r.line_no,
+                score=r.score,
+                match_pos=r.match_pos,
+                snippet=extract_context_lines(r.text or r.snippet, query, context_lines),
+                text=r.text,
+            )
+            for r in results
+        ]
+
     # Apply snippet length clamp at the presentation layer to keep search logic simple.
-    if snippet_len != 180:
+    if (not full_content) and context_lines == 0 and snippet_len != 180:
         trimmed = []
         for r in results:
             if len(r.snippet) <= snippet_len:
@@ -209,7 +273,9 @@ def search(
                         file_path=r.file_path,
                         line_no=r.line_no,
                         score=r.score,
+                        match_pos=r.match_pos,
                         snippet=r.snippet[: snippet_len - 1] + "…",
+                        text=r.text,
                     )
                 )
         results = trimmed

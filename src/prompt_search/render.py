@@ -137,19 +137,23 @@ def render_search_results(
     if fmt == "json":
         payload = []
         for r in results:
-            payload.append(
-                {
-                    "doc_id": r.doc_id,
-                    "session_id": r.session_id,
-                    "event_ts": r.event_ts.isoformat() if r.event_ts else None,
-                    "role": r.role,
-                    "kind": r.kind,
-                    "file_path": r.file_path,
-                    "line_no": r.line_no,
-                    "score": r.score,
-                    "snippet": r.snippet,
-                }
-            )
+            item = {
+                "doc_id": r.doc_id,
+                "session_id": r.session_id,
+                "event_ts": r.event_ts.isoformat() if r.event_ts else None,
+                "role": r.role,
+                "kind": r.kind,
+                "file_path": r.file_path,
+                "line_no": r.line_no,
+                "score": r.score,
+                "snippet": r.snippet,
+            }
+            # Optional fields for callers that requested more than a snippet.
+            if r.text is not None:
+                item["text"] = r.text
+            if r.match_pos is not None:
+                item["match_pos"] = r.match_pos
+            payload.append(item)
         return json.dumps({"mode": mode, "results": payload}, ensure_ascii=True, indent=2, sort_keys=True)
 
     if fmt == "markdown":
@@ -162,8 +166,8 @@ def render_search_results(
             score = f"{r.score:.3f}" if r.score is not None else "-"
             sid = r.session_id or "-"
             role = r.role or "-"
-            snippet = highlight_snippet_markdown(" ".join(r.snippet.split()), query)
-            snippet = snippet.replace("\n", " ").replace("|", "\\|")
+            snippet = highlight_snippet_markdown(r.snippet, query)
+            snippet = snippet.replace("\n", "<br>").replace("|", "\\|")
             lines.append(f"| {ts} | {score} | `{sid}` | `{role}` | {snippet} |")
         return "\n".join(lines)
 
