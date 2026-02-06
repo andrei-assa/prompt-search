@@ -12,6 +12,7 @@ license = { text = "MIT" }
 authors = [{ name = "prompt-search contributors" }]
 dependencies = [
   "duckdb>=1.4.4",
+  "rich>=13.7.0",
   "typer>=0.12.0",
 ]
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import time
 from pathlib import Path
 
@@ -11,9 +10,17 @@ from .ingest import refresh as refresh_impl
 from .paths import db_path, default_data_dir, default_sessions_dir
 from .search import search as search_impl
 from .util import json_dumps_compact
+from .render import COLOR_MODES, OUTPUT_FORMATS, render_search_results, render_sessions
 
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
+
+def _normalize_choice(value: str, allowed: tuple[str, ...], flag: str) -> str:
+    v = (value or "").strip().lower()
+    if v in allowed:
+        return v
+    typer.echo(f"invalid {flag}: {value!r} (choose one of: {', '.join(allowed)})", err=True)
+    raise typer.Exit(code=2)
 
 
 def _open_db_ro(data_dir: Path):
@@ -74,9 +81,25 @@ def refresh(
 def list_sessions(
     data_dir: Path = typer.Option(None, "--data-dir", help="prompt-search data directory."),
     limit: int = typer.Option(50, "--limit", min=1, max=5000),
-    json_out: bool = typer.Option(False, "--json", help="Output JSON."),
+    output_format: str = typer.Option(
+        "table",
+        "--format",
+        help="Output format: table, text, json, markdown.",
+        show_choices=True,
+        case_sensitive=False,
+    ),
+    color: str = typer.Option(
+        "auto",
+        "--color",
+        help="Color mode: auto, always, never.",
+        show_choices=True,
+        case_sensitive=False,
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Alias for --format json."),
 ):
     ddir = (data_dir or default_data_dir()).expanduser()
+    output_format = _normalize_choice("json" if json_out else output_format, OUTPUT_FORMATS, "--format")
+    color = _normalize_choice(color, COLOR_MODES, "--color")
     con = _open_db_ro(ddir)
 
     rows = con.execute(
@@ -111,16 +134,9 @@ def list_sessions(
         }
         out.append(item)
 
-    if json_out:
-        typer.echo(json.dumps(out, ensure_ascii=True, indent=2, sort_keys=True))
-        return
-
-    for item in out:
-        typer.echo(
-            f"{item['last_ts'] or '-'}  {item['session_id']}  "
-            f"user={item['user_docs']} assistant={item['assistant_docs']} internal={item['internal_docs']}  "
-            f"cwd={item['cwd'] or '-'}"
-        )
+    rendered = render_sessions(rows=out, output_format=output_format, color=color)
+    if rendered is not None:
+        typer.echo(rendered)
 
 
 @app.command()
@@ -128,14 +144,31 @@ def search(
     query: str = typer.Argument(..., help="Search query."),
     data_dir: Path = typer.Option(None, "--data-dir", help="prompt-search data directory."),
     limit: int = typer.Option(20, "--limit", min=1, max=5000),
+    snippet_len: int = typer.Option(180, "--snippet-len", min=40, max=2000, help="Snippet length."),
     include_assistant: bool = typer.Option(False, "--include-assistant", help="Include assistant messages."),
     include_internal: bool = typer.Option(False, "--include-internal", help="Include internal events."),
     auto_refresh: bool = typer.Option(False, "--auto-refresh", help="Run refresh before searching."),
     sessions_dir: Path = typer.Option(None, "--sessions-dir", help="Used with --auto-refresh."),
     no_reindex: bool = typer.Option(False, "--no-reindex", help="Used with --auto-refresh."),
-    json_out: bool = typer.Option(False, "--json", help="Output JSON."),
+    output_format: str = typer.Option(
+        "table",
+        "--format",
+        help="Output format: table, text, json, markdown.",
+        show_choices=True,
+        case_sensitive=False,
+    ),
+    color: str = typer.Option(
+        "auto",
+        "--color",
+        help="Color mode: auto, always, never.",
+        show_choices=True,
+        case_sensitive=False,
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Alias for --format json."),
 ):
     ddir = (data_dir or default_data_dir()).expanduser()
+    output_format = _normalize_choice("json" if json_out else output_format, OUTPUT_FORMATS, "--format")
+    color = _normalize_choice(color, COLOR_MODES, "--color")
 
     if auto_refresh:
         sdir = (sessions_dir or default_sessions_dir()).expanduser()
@@ -159,33 +192,37 @@ def search(
         include_internal=include_internal,
     )
 
-    if json_out:
-        payload = [
-            {
-                "doc_id": r.doc_id,
-                "session_id": r.session_id,
-                "event_ts": r.event_ts.isoformat() if r.event_ts else None,
-                "role": r.role,
-                "kind": r.kind,
-                "file_path": r.file_path,
-                "line_no": r.line_no,
-                "score": r.score,
-                "snippet": r.snippet,
-            }
-            for r in results
-        ]
-        typer.echo(json.dumps({"mode": mode, "results": payload}, ensure_ascii=True, indent=2, sort_keys=True))
-        return
+    # Apply snippet length clamp at the presentation layer to keep search logic simple.
+    if snippet_len != 180:
+        trimmed = []
+        for r in results:
+            if len(r.snippet) <= snippet_len:
+                trimmed.append(r)
+            else:
+                trimmed.append(
+                    type(r)(
+                        doc_id=r.doc_id,
+                        session_id=r.session_id,
+                        event_ts=r.event_ts,
+                        role=r.role,
+                        kind=r.kind,
+                        file_path=r.file_path,
+                        line_no=r.line_no,
+                        score=r.score,
+                        snippet=r.snippet[: snippet_len - 1] + "…",
+                    )
+                )
+        results = trimmed
 
-    if mode != "fts":
-        typer.echo("(fts unavailable; using substring search)")
-
-    for r in results:
-        ts = r.event_ts.isoformat() if r.event_ts else "-"
-        sid = r.session_id or "-"
-        role = r.role or "-"
-        score = f"{r.score:.3f}" if r.score is not None else "-"
-        typer.echo(f"{ts}  {score}  {sid}  {role}  {r.snippet}")
+    rendered = render_search_results(
+        results=results,
+        mode=mode,
+        query=query,
+        output_format=output_format,
+        color=color,
+    )
+    if rendered is not None:
+        typer.echo(rendered)
 
 
 @app.command("debug-db")

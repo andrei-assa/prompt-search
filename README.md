@@ -32,8 +32,26 @@ prompt-search search "my query"
 prompt-search list-sessions
 ```
 
+## Output formats
+
+Both `search` and `list-sessions` support:
+
+```bash
+prompt-search search "Summarize" --format table
+prompt-search search "Summarize" --format text
+prompt-search search "Summarize" --format json
+prompt-search search "Summarize" --format markdown
+```
+
+You can also control ANSI colors:
+
+```bash
+prompt-search search "Summarize" --color auto
+prompt-search search "Summarize" --color always
+prompt-search search "Summarize" --color never
+```
+
 ## Notes
 
 - If DuckDB's `fts` extension is unavailable (e.g. offline on first use), `search` will fall back to substring search.
 - Default search scope is user-only. Use `--include-assistant` / `--include-internal` to widen.
-

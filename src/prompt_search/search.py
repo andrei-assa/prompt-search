@@ -24,8 +24,18 @@ def _make_snippet(text: str, query: str, max_len: int = 180) -> str:
     t = " ".join(text.split())
     if len(t) <= max_len:
         return t
-    q = query.strip().lower()
-    idx = t.lower().find(q) if q else -1
+    q_raw = query.strip()
+    if not q_raw:
+        return t[: max_len - 1] + "…"
+
+    # Prefer centering on any matching token, but keep substring UX by checking the full query too.
+    needles = [q_raw] + [p for p in q_raw.split() if len(p) >= 2]
+    h = t.lower()
+    idx = -1
+    for n in needles:
+        j = h.find(n.lower())
+        if j >= 0 and (idx < 0 or j < idx):
+            idx = j
     if idx < 0:
         return t[: max_len - 1] + "…"
     start = max(0, idx - max_len // 3)
