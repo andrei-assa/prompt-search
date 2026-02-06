@@ -31,8 +31,9 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/REPLACE_ME/prompt-search"
-Issues = "https://github.com/REPLACE_ME/prompt-search/issues"
+Homepage = "https://github.com/andrei-assa/prompt-search"
+Repository = "https://github.com/andrei-assa/prompt-search"
+Issues = "https://github.com/andrei-assa/prompt-search/issues"
 
 [project.optional-dependencies]
 dev = [

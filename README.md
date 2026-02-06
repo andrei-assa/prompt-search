@@ -24,10 +24,10 @@ Or with uv:
 uv tool install .
 ```
 
-From GitHub (replace `REPLACE_ME`):
+From GitHub:
 
 ```bash
-uv tool install "git+https://github.com/REPLACE_ME/prompt-search"
+uv tool install "git+https://github.com/andrei-assa/prompt-search"
 ```
 
 ## Quickstart
